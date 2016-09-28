@@ -1,0 +1,102 @@
+import studio4.SerialComm;
+import java.io.*;
+import assignment4.MsgReceiver.State;
+public class Health {
+	final private InputStream vis;
+	public enum State{magicNum, pulse, steps,filtTemp}
+	public Health(InputStream in) {
+		this.vis = in;
+	}
+	/**
+	 * @param args
+	 */
+
+	public static void main(String[] args) {
+		try
+		{        
+			SerialComm s = new SerialComm();
+			s.connect("/dev/cu.usbserial-DN00YSJ2"); // Adjust this to be the right port for your machine
+			InputStream in = s.getInputStream();
+			Health msgr = new Health(in);
+			msgr.run();
+			//System.out.println("hello");
+		}
+		catch ( Exception e )
+		{
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	public void run() {
+		int x = 0;
+		try {
+			State state = State.magicNum;
+			while (true) {
+				if (vis.available() > 0){
+					State nextState = null;
+					int total = 0; 
+					switch(state){
+					case magicNum:
+						byte b = (byte) vis.read();
+						if (b == 50){
+							nextState = State.pulse;
+						}
+
+						else if (b == 51){
+							nextState = State.filtTemp;
+						}
+
+						else if (b == 54){
+							nextState = State.steps;
+						}
+
+						else{
+							nextState = State.magicNum;
+						}
+						break;
+
+					case pulse:
+						nextState = State.magicNum;
+						total = 0;
+						for (int i = 1; i >= 0; i--) {
+							int j = vis.read();
+							total = total + j << (8*i); 
+						}
+
+						System.out.println("pulse: " + total);
+						break;
+
+					case filtTemp:
+						nextState = State.magicNum;
+						total = 0;
+						for (int i = 1; i >= 0; i--) {
+							int j = vis.read();
+							total = total + j << (8*i); 
+						}
+						System.out.println("filtered temp: " + total);
+						break;
+
+					case steps:
+						nextState = State.magicNum;
+						total = 0;
+						for (int i = 1; i >= 0; i--) {
+							int j = vis.read();
+							total = total + j << (8*i); 
+						}
+						System.out.println("steps: " + total);
+						break;
+
+					default:
+						nextState= State.magicNum;
+						System.out.println("!!!ERROR");
+						break;
+					}
+					state = nextState;
+				}
+			}
+		} catch (IOException e) {
+			// FIXME Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+}
