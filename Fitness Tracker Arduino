@@ -1,0 +1,174 @@
+ 
+#include <Arduino.h>
+#include <Wire.h>
+#include <ST7036.h>
+#include <Adafruit_MMA8451.h>
+#include <Adafruit_Sensor.h>
+#define FILTER_COUNTS 5
+
+Adafruit_MMA8451 mma = Adafruit_MMA8451();
+ST7036 lcd = ST7036 (2, 16, 0x7c);
+
+const int SW2 = 13;
+long lastDebounceTime = 0;
+long debounceDelay = 500;
+
+const int sensor = A3;
+
+double a1 = -1.9789467705;
+double a2 = 0.97927235;
+double b0 = 0.01036382;
+double b1 = 0;
+double b2 = -0.01036382;
+
+double bwPulse[]= {0,0,0};
+double bwPulse2[]= {0,0,0};
+
+boolean checkPeak = false;
+
+long findPeak [] = {0,0,0};
+long timearray [] = {0, 0};
+long deltaTime = 0;
+
+long total [FILTER_COUNTS];
+float volts = 0;
+float temperature = 0;
+int count = 0;
+int avgBeat = 0;
+int bpm = 0;
+long accumulator = 0;
+
+int readpin = 0;
+int pin = 2;
+
+float temp[FILTER_COUNTS];
+int tempcount = 0; 
+float avgTemp = 0; 
+float period = 0;
+
+long accumulator2 = 0;
+bool maxStep = false;
+int stepCount = 0;
+double accel = 0;
+
+void setup () 
+{
+  Serial.begin(9600);
+  lcd.init ();
+  lcd.setContrast(0);
+
+  mma.setRange(MMA8451_RANGE_8_G);
+  mma.begin();
+  
+  pinMode(sensor, INPUT);
+  pinMode(SW2, INPUT_PULLUP);
+  
+  analogReference(DEFAULT);
+}
+
+void loop ()
+{
+ int button = digitalRead(SW2);
+
+ if (millis() - lastDebounceTime > debounceDelay) {
+    if (button == LOW){
+       lastDebounceTime = millis();
+       stepCount = 0;
+    }
+ }
+
+ if (micros() - accumulator > 2000) {
+  accumulator += 2000;
+  mma.read();
+  
+  sensors_event_t event; 
+  mma.getEvent(&event);
+  
+  accel = event.acceleration.z;
+  
+  /*adding to stepCount and sending to java*/
+  if (accel > 1.5 && !maxStep) {
+    maxStep = true;
+    stepCount++;
+    
+    Serial.write(0x21);
+    Serial.write(54);
+    Serial.write(stepCount >> 8);
+    Serial.write(stepCount);
+    
+    lcd.setCursor(1,0);
+    lcd.print("Steps: ");
+    lcd.print(stepCount);
+  } 
+
+  /*otherwise*/
+  else if (accel < 0.5) {
+    maxStep = false; 
+  }
+ }
+
+  if (micros() - accumulator2 > 2000) {
+    accumulator2 += 2000;
+    total[count % FILTER_COUNTS] = analogRead(sensor);
+    count++;
+    
+    avgBeat = (total[0] + total[1] + total[2] + total[3] + total[4])/5.0;
+
+    /*to account for rolling numbers*/
+    bwPulse[0] = bwPulse[1];
+    bwPulse[1] = bwPulse[2];
+    
+    bwPulse2[0] = bwPulse2[1];
+    bwPulse2[1] = bwPulse2[2];
+    bwPulse[2] = avgBeat;
+
+    /*butterworth*/
+    bwPulse2[2] = b0*bwPulse[2] + b1*bwPulse[1] + b2*bwPulse[0] - a1*bwPulse2[1] - a2*bwPulse2[0];
+
+    if (bwPulse2[1] > bwPulse2[2] && bwPulse2[1] > bwPulse2[0] && bwPulse2[1] > 0) {
+      /*is there a peak?*/
+      checkPeak = true;
+      /*use delta time with an array*/
+      timearray[1] = micros();
+      deltaTime = timearray[1] - timearray[0];
+
+      /*transfer into java*/
+      if (deltaTime > 1000000.0) {
+        bpm = (int) ((1.0/deltaTime)*60000000.0); /*convert micros*/
+        timearray[0] = timearray[1];
+        
+        Serial.write(0x21);
+        Serial.write(50);
+        Serial.write(bpm >> 8);
+        Serial.write(bpm);
+        
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Pulse: ");
+        lcd.print(bpm);
+
+        /*writing temp into java*/
+        readpin = analogRead(pin);
+        volts = (((float) readpin/1023) *5); /*temp conversion*/
+        temperature = (volts*100) - 50;
+        Serial.write(0x21);
+        Serial.write(51);
+        
+        temp[count % FILTER_COUNTS] = temperature;
+        tempcount += 1;
+        avgTemp = (temp[0] + temp[1] + temp [2] + temp [3] + temp [4])/5.0;
+        int bits = (int) avgTemp;
+        
+        Serial.write(bits >> 8);
+        Serial.write(bits);
+        
+        lcd.setCursor(0,10); 
+        lcd.print(bits);   
+      }
+    } 
+  
+  else {
+    checkPeak = false;
+  }   
+}
+}
